@@ -1,0 +1,281 @@
+// BankApp.swift
+// Single-file SwiftUI demo app that demonstrates:
+//  - Card generation and validation using the Luhn algorithm
+//  - A minimal local "bank" server and client using Network (NWListener / NWConnection)
+//  - Simple SwiftUI UI to create, list, and validate cards
+//  - Account balances: every generated card receives a "millions"-level balance (randomized between 1,000,000 and 9,999,999 for demo purposes)
+//
+// How to use:
+// 1. Create a new Xcode project (App) -> SwiftUI -> iOS (or macOS) and replace the default ContentView/App file with this file.
+// 2. Build & run in the simulator. The app starts a local in-app "bank server" that listens on a local port and a client that can send "create card" requests.
+// 3. Use the UI to create cards, validate cards with Luhn, view logs, and see the account balance.
+//
+// Note: This file is intended for educational/demo purposes only. Do NOT use the generated card numbers for fraud or commerce.
+
+import SwiftUI
+import Network
+
+// MARK: - Models
+
+struct Card: Identifiable, Codable {
+    let id: UUID
+    let holderName: String
+    let prefix: String // e.g., BIN/IIN prefix like 400000 for Visa test
+    let number: String
+    let expiryMonth: Int
+    let expiryYear: Int
+    let cvv: String
+    var balance: Decimal
+
+    init(id: UUID = .init(), holderName: String, prefix: String, number: String, expiryMonth: Int, expiryYear: Int, cvv: String, balance: Decimal) {
+        self.id = id
+        self.holderName = holderName
+        self.prefix = prefix
+        self.number = number
+        self.expiryMonth = expiryMonth
+        self.expiryYear = expiryYear
+        self.cvv = cvv
+        self.balance = balance
+    }
+}
+
+// Helper to produce a "millions" balance for demo cards
+func randomMillionsBalance() -> Decimal {
+    let millions = Int.random(in: 1_000_000...9_999_999)
+    return Decimal(millions)
+}
+
+// MARK: - Luhn Algorithm
+
+enum Luhn {
+    static func checksumDigit(forPartial partial: String) -> Int? {
+        guard partial.allSatisfy({ $0.isNumber }) else { return nil }
+        let digits = partial.compactMap { Int(String($0)) }
+        var sum = 0
+        let reversed = digits.reversed()
+        for (idx, d) in reversed.enumerated() {
+            if idx % 2 == 0 {
+                let doubled = d * 2
+                sum += (doubled > 9) ? (doubled - 9) : doubled
+            } else {
+                sum += d
+            }
+        }
+        let mod = sum % 10
+        let check = (10 - mod) % 10
+        return check
+    }
+
+    static func isValid(_ number: String) -> Bool {
+        let onlyDigits = number.filter { $0.isNumber }
+        guard onlyDigits.count >= 2 else { return false }
+        let digits = onlyDigits.compactMap { Int(String($0)) }
+        var sum = 0
+        for (idx, d) in digits.reversed().enumerated() {
+            if idx % 2 == 1 {
+                let doubled = d * 2
+                sum += (doubled > 9) ? (doubled - 9) : doubled
+            } else {
+                sum += d
+            }
+        }
+        return sum % 10 == 0
+    }
+
+    static func generateCardNumber(prefix: String, length: Int = 16) -> String? {
+        guard prefix.allSatisfy({ $0.isNumber }) else { return nil }
+        guard length > prefix.count + 0 else { return nil }
+        var partial = prefix
+        while partial.count < length - 1 {
+            partial.append(String(Int.random(in: 0...9)))
+        }
+        guard let check = checksumDigit(forPartial: partial) else { return nil }
+        return partial + String(check)
+    }
+}
+
+// MARK: - Simple Card Store
+
+class CardStore: ObservableObject {
+    @Published private(set) var cards: [Card] = []
+
+    func add(_ card: Card) {
+        cards.append(card)
+    }
+
+    func remove(at offsets: IndexSet) {
+        cards.remove(atOffsets: offsets)
+    }
+}
+
+// MARK: - Network Messages
+
+struct BankRequest: Codable {
+    let action: String // "create_card"
+    let holderName: String?
+    let binPrefix: String?
+}
+
+struct BankResponse: Codable {
+    let status: String
+    let message: String
+    let card: Card?
+}
+
+// MARK: - Bank Server
+
+final class BankServer {
+    private var listener: NWListener?
+    private(set) var port: NWEndpoint.Port?
+    private var connections: [NWConnection] = []
+    var onLog: ((String) -> Void)?
+    var onCreatedCard: ((Card) -> Void)?
+
+    func startListening() throws {
+        let params = NWParameters.tcp
+        listener = try NWListener(using: params)
+        listener?.newConnectionHandler = { [weak self] connection in
+            self?.handleNewConnection(connection)
+        }
+        listener?.stateUpdateHandler = { [weak self] state in
+            self?.onLog?("Server state: \(state)")
+        }
+        listener?.start(queue: .main)
+        if let port = listener?.port {
+            self.port = port
+            onLog?("Server listening on port \(port)")
+        }
+    }
+
+    func stop() {
+        listener?.cancel()
+        listener = nil
+        for c in connections { c.cancel() }
+        connections.removeAll()
+        onLog?("Server stopped")
+    }
+
+    private func handleNewConnection(_ connection: NWConnection) {
+        connections.append(connection)
+        connection.start(queue: .main)
+        receive(on: connection)
+    }
+
+    private func receive(on connection: NWConnection) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 16_384) { [weak self] data, _, isComplete, error in
+            guard let self = self else { return }
+            if let data = data, !data.isEmpty {
+                self.handle(data: data, from: connection)
+            }
+            if error == nil && !isComplete {
+                self.receive(on: connection)
+            } else {
+                connection.cancel()
+            }
+        }
+    }
+
+    private func handle(data: Data, from connection: NWConnection) {
+        do {
+            let req = try JSONDecoder().decode(BankRequest.self, from: data)
+            if req.action == "create_card", let bin = req.binPrefix {
+                let holder = req.holderName ?? "Unnamed"
+                let cardNumber = Luhn.generateCardNumber(prefix: bin) ?? ""
+                let cvv = String(format: "%03d", Int.random(in: 0...999))
+                let expiryMonth = Int.random(in: 1...12)
+                let expiryYear = Calendar.current.component(.year, from: Date()) + Int.random(in: 1...5)
+                let balance = randomMillionsBalance()
+                let card = Card(holderName: holder, prefix: bin, number: cardNumber, expiryMonth: expiryMonth, expiryYear: expiryYear, cvv: cvv, balance: balance)
+                onCreatedCard?(card)
+                let resp = BankResponse(status: "success", message: "Card created", card: card)
+                send(response: resp, to: connection)
+            } else {
+                let resp = BankResponse(status: "error", message: "Unknown action", card: nil)
+                send(response: resp, to: connection)
+            }
+        } catch {
+            let resp = BankResponse(status: "error", message: "Invalid JSON", card: nil)
+            send(response: resp, to: connection)
+        }
+    }
+
+    private func send(response: BankResponse, to connection: NWConnection) {
+        do {
+            let data = try JSONEncoder().encode(response)
+            connection.send(content: data, completion: .contentProcessed({ _ in }))
+        } catch {
+            onLog?("Encode error: \(error)")
+        }
+    }
+}
+
+// MARK: - SwiftUI Views
+
+struct ContentView: View {
+    @StateObject private var store = CardStore()
+    @State private var server = BankServer()
+
+    @State private var holderName = "Alice Example"
+    @State private var binPrefix = "400000"
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 12) {
+                HStack {
+                    TextField("Card Holder", text: $holderName)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                    TextField("BIN Prefix", text: $binPrefix)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .frame(width: 120)
+                }
+                Button("Generate Card") {
+                    let cardNumber = Luhn.generateCardNumber(prefix: binPrefix) ?? ""
+                    let cvv = String(format: "%03d", Int.random(in: 0...999))
+                    let expiryMonth = Int.random(in: 1...12)
+                    let expiryYear = Calendar.current.component(.year, from: Date()) + Int.random(in: 1...5)
+                    let balance = randomMillionsBalance()
+                    let card = Card(holderName: holderName, prefix: binPrefix, number: cardNumber, expiryMonth: expiryMonth, expiryYear: expiryYear, cvv: cvv, balance: balance)
+                    store.add(card)
+                }
+                .buttonStyle(.bordered)
+
+                List {
+                    ForEach(store.cards) { card in
+                        VStack(alignment: .leading) {
+                            Text(card.holderName).font(.headline)
+                            Text("Number: \(masked(card.number))")
+                            Text("Expiry: \(card.expiryMonth)/\(card.expiryYear)  CVV: \(card.cvv)")
+                            Text("Balance: $\(NSDecimalNumber(decimal: card.balance).intValue.formatted())")
+                                .foregroundColor(.blue)
+                            Text("Luhn valid: \(Luhn.isValid(card.number) ? "Yes" : "No")")
+                                .foregroundColor(Luhn.isValid(card.number) ? .green : .red)
+                        }
+                        .padding(6)
+                    }
+                    .onDelete(perform: store.remove)
+                }
+            }
+            .padding()
+            .navigationTitle("Bank Demo")
+        }
+    }
+
+    private func masked(_ number: String) -> String {
+        let visible = 4
+        let digits = number.filter { $0.isNumber }
+        guard digits.count > visible else { return digits }
+        let prefix = digits.prefix(6)
+        let suffix = digits.suffix(visible)
+        let middle = String(repeating: "*", count: max(0, digits.count - prefix.count - suffix.count))
+        return prefix + middle + suffix
+    }
+}
+
+@main
+struct BankApp: App {
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+    }
+}
