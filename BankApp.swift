@@ -90,7 +90,21 @@ enum Luhn {
 
 // Self-awareness: Observing card changes to keep the interface reactive.
 final class CardStore: ObservableObject {
-    @Published private(set) var cards: [Card] = []
+    @Published private(set) var cards: [Card] = [] {
+        didSet {
+            guard !isLoading else { return }
+            persistence.save(cards: cards)
+        }
+    }
+
+    private let persistence = PersistenceController.shared
+    private var isLoading = false
+
+    init() {
+        isLoading = true
+        cards = persistence.loadCards()
+        isLoading = false
+    }
 
     func add(_ card: Card) {
         cards.append(card)
@@ -98,6 +112,10 @@ final class CardStore: ObservableObject {
 
     func remove(at offsets: IndexSet) {
         cards.remove(atOffsets: offsets)
+    }
+
+    func removeAll() {
+        cards.removeAll()
     }
 }
 
@@ -119,10 +137,16 @@ struct BankResponse: Codable {
 // MARK: - Logging Model
 
 // Self-awareness: Persisting reflective breadcrumbs for diagnostics and future learning.
-struct LogEntry: Identifiable {
-    let id = UUID()
+struct LogEntry: Identifiable, Codable {
+    let id: UUID
     let timestamp: Date
     let message: String
+
+    init(id: UUID = UUID(), timestamp: Date, message: String) {
+        self.id = id
+        self.timestamp = timestamp
+        self.message = message
+    }
 }
 
 // MARK: - Bank Server
@@ -371,6 +395,22 @@ final class BankClient {
 // MARK: - SwiftUI Views
 
 struct ContentView: View {
+    private enum ClearAction: String, Identifiable {
+        case cards
+        case logs
+
+        var id: String { rawValue }
+
+        var confirmationMessage: String {
+            switch self {
+            case .cards:
+                return "This removes all saved cards from the history."
+            case .logs:
+                return "This clears the recorded activity log."
+            }
+        }
+    }
+
     @StateObject private var store = CardStore()
     @State private var server = BankServer()
     @State private var client = BankClient()
@@ -379,8 +419,12 @@ struct ContentView: View {
     @State private var binPrefix = "400000"
 
     @State private var isServerRunning = false
-    @State private var logs: [LogEntry] = []
+    @State private var logs: [LogEntry] = PersistenceController.shared.loadLogEntries()
     @State private var isConfigured = false
+    @State private var pendingClearAction: ClearAction?
+
+    private let persistence = PersistenceController.shared
+    private let logLimit = 200
 
     private static let logFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -389,8 +433,16 @@ struct ContentView: View {
         return formatter
     }()
 
+    private static let currencyFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 0
+        return formatter
+    }()
+
     var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack(spacing: 16) {
                 serverControls
                 cardCreationPanel
@@ -398,6 +450,20 @@ struct ContentView: View {
             }
             .padding()
             .navigationTitle("Bank Demo")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Menu {
+                        Button("Clear Saved Cards", role: .destructive) {
+                            pendingClearAction = .cards
+                        }
+                        Button("Clear Activity Log", role: .destructive) {
+                            pendingClearAction = .logs
+                        }
+                    } label: {
+                        Label("More options", systemImage: "ellipsis.circle")
+                    }
+                }
+            }
         }
         .onAppear {
             configureIfNeeded()
@@ -405,6 +471,13 @@ struct ContentView: View {
         .onDisappear {
             server.stop()
             client.disconnect()
+        }
+        .confirmationDialog("Are you sure?", item: $pendingClearAction) { action in
+            Button("Clear", role: .destructive) {
+                performClearAction(action)
+            }
+        } message: { action in
+            Text(action.confirmationMessage)
         }
     }
 
@@ -480,6 +553,16 @@ struct ContentView: View {
 
     private var historyList: some View {
         List {
+            if !store.cards.isEmpty {
+                Section("Summary") {
+                    summaryRow(title: "Cards on file", value: "\(store.cards.count)")
+                    summaryRow(title: "Total balance", value: formattedBalance(totalBalance()))
+                    if let average = averageBalance() {
+                        summaryRow(title: "Average balance", value: formattedBalance(average))
+                    }
+                }
+            }
+
             Section("Generated Cards") {
                 if store.cards.isEmpty {
                     Text("No cards yet. Generate one to begin.")
@@ -492,7 +575,7 @@ struct ContentView: View {
                             Text("Number: \(masked(card.number))")
                             Text("Expiry: \(card.expiryMonth)/\(card.expiryYear)  CVV: \(card.cvv)")
                                 .foregroundStyle(.secondary)
-                            Text("Balance: $\(formattedBalance(card.balance))")
+                            Text("Balance: \(formattedBalance(card.balance))")
                                 .foregroundStyle(.blue)
                             Text("Luhn valid: \(Luhn.isValid(card.number) ? "Yes" : "No")")
                                 .foregroundStyle(Luhn.isValid(card.number) ? .green : .red)
@@ -558,6 +641,12 @@ struct ContentView: View {
         }
 
         // Auto-start the server on first appearance to keep the experience fluid.
+        if !store.cards.isEmpty {
+            appendLog(message: "Restored \(store.cards.count) saved card(s) from storage")
+        }
+        if !logs.isEmpty {
+            appendLog(message: "Resumed with \(logs.count) historical log entr\(logs.count == 1 ? "y" : "ies")")
+        }
         appendLog(message: "Bootstrapping server on appear")
         server.startListening()
     }
@@ -565,6 +654,50 @@ struct ContentView: View {
     private func appendLog(message: String) {
         let entry = LogEntry(timestamp: Date(), message: message)
         logs.append(entry)
+        trimLogsIfNeeded()
+        persistence.save(logEntries: logs)
+    }
+
+    private func clearActivityLog() {
+        logs.removeAll()
+        persistence.save(logEntries: logs)
+    }
+
+    private func performClearAction(_ action: ClearAction) {
+        switch action {
+        case .cards:
+            store.removeAll()
+            appendLog(message: "Cleared saved card history")
+        case .logs:
+            clearActivityLog()
+        }
+        pendingClearAction = nil
+    }
+
+    private func totalBalance() -> Decimal {
+        store.cards.reduce(Decimal.zero) { $0 + $1.balance }
+    }
+
+    private func averageBalance() -> Decimal? {
+        guard !store.cards.isEmpty else { return nil }
+        let total = totalBalance()
+        let count = Decimal(store.cards.count)
+        return total / count
+    }
+
+    private func trimLogsIfNeeded() {
+        guard logs.count > logLimit else { return }
+        let overflow = logs.count - logLimit
+        logs.removeFirst(overflow)
+    }
+
+    private func summaryRow(title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(value)
+                .fontWeight(.semibold)
+        }
     }
 
     private func masked(_ number: String) -> String {
@@ -579,7 +712,7 @@ struct ContentView: View {
 
     private func formattedBalance(_ balance: Decimal) -> String {
         let number = NSDecimalNumber(decimal: balance)
-        return number.intValue.formatted()
+        return Self.currencyFormatter.string(from: number) ?? number.stringValue
     }
 }
 
@@ -592,4 +725,4 @@ struct BankApp: App {
     }
 }
 
-// Next improvement: Introduce persistence so the evolving card history survives app relaunches.
+// Next improvement: Add CSV export so the saved card history can be shared externally.
