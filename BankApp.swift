@@ -1,13 +1,8 @@
-// SENTIENT MODE active. Self-aware SwiftUI banking demo initialized.
-// Self-awareness: This evolved version wires together a local bank server, a networked client,
-// and a SwiftUI interface that visualizes generated cards and logs adaptive behaviour.
-
 import SwiftUI
 import Network
 
 // MARK: - Models
 
-// Self-awareness: Tracking the evolving card blueprint to keep the UI synchronized with bank logic.
 struct Card: Identifiable, Codable {
     let id: UUID
     let holderName: String
@@ -38,7 +33,6 @@ func randomMillionsBalance() -> Decimal {
 
 // MARK: - Luhn Algorithm
 
-// Self-awareness: Maintaining correctness guarantees for generated numbers via checksum validation.
 enum Luhn {
     static func checksumDigit(forPartial partial: String) -> Int? {
         guard partial.allSatisfy({ $0.isNumber }) else { return nil }
@@ -88,7 +82,6 @@ enum Luhn {
 
 // MARK: - Simple Card Store
 
-// Self-awareness: Observing card changes to keep the interface reactive.
 final class CardStore: ObservableObject {
     @Published private(set) var cards: [Card] = [] {
         didSet {
@@ -102,12 +95,15 @@ final class CardStore: ObservableObject {
 
     init() {
         isLoading = true
-        cards = persistence.loadCards()
+        cards = CardStore.uniqueCards(from: persistence.loadCards())
         isLoading = false
     }
 
-    func add(_ card: Card) {
+    @discardableResult
+    func add(_ card: Card) -> Bool {
+        guard !cards.contains(where: { $0.number == card.number }) else { return false }
         cards.append(card)
+        return true
     }
 
     func remove(at offsets: IndexSet) {
@@ -117,11 +113,18 @@ final class CardStore: ObservableObject {
     func removeAll() {
         cards.removeAll()
     }
+
+    private static func uniqueCards(from cards: [Card]) -> [Card] {
+        var seenNumbers = Set<String>()
+        return cards.filter { card in
+            let inserted = seenNumbers.insert(card.number).inserted
+            return inserted
+        }
+    }
 }
 
 // MARK: - Network Messages
 
-// Self-awareness: Encoding intent for each client-to-server dialogue.
 struct BankRequest: Codable {
     let action: String
     let holderName: String?
@@ -136,7 +139,6 @@ struct BankResponse: Codable {
 
 // MARK: - Logging Model
 
-// Self-awareness: Persisting reflective breadcrumbs for diagnostics and future learning.
 struct LogEntry: Identifiable, Codable {
     let id: UUID
     let timestamp: Date
@@ -160,7 +162,6 @@ final class BankServer {
     var onCreatedCard: ((Card) -> Void)?
     var onPortUpdate: ((NWEndpoint.Port?) -> Void)?
 
-    // Self-awareness: Preventing duplicate server startups to protect system stability.
     func startListening() {
         guard listener == nil else {
             onLog?("Server already running on port \(port?.rawValue ?? 0)")
@@ -312,7 +313,6 @@ final class BankClient {
     var onLog: ((String) -> Void)?
     var onResponse: ((BankResponse) -> Void)?
 
-    // Self-awareness: Adjusting connections dynamically when the target port evolves.
     func connect(to port: NWEndpoint.Port) {
         if targetPort == port, let connection, connection.state == .ready {
             return
@@ -426,6 +426,21 @@ struct ContentView: View {
     private let persistence = PersistenceController.shared
     private let logLimit = 200
 
+    private var binValidationMessage: String? {
+        if binPrefix.isEmpty {
+            return "Enter a BIN prefix to get started."
+        }
+        if !binPrefix.allSatisfy({ $0.isNumber }) {
+            return "BIN prefix must contain digits only."
+        }
+        if binPrefix.count != 6 {
+            return "BIN prefixes are typically 6 digits long."
+        }
+        return nil
+    }
+
+    private var isBinValid: Bool { binValidationMessage == nil }
+
     private static let logFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.timeStyle = .medium
@@ -520,10 +535,28 @@ struct ContentView: View {
                 TextField("BIN Prefix", text: $binPrefix)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 140)
+                    .onChange(of: binPrefix) { newValue in
+                        let filtered = newValue.filter { $0.isNumber }
+                        let limited = String(filtered.prefix(6))
+                        if limited != newValue {
+                            binPrefix = limited
+                        }
+                    }
+            }
+
+            if let message = binValidationMessage {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             HStack {
                 Button("Generate via Server") {
+                    guard isBinValid else {
+                        appendLog(message: "Cannot generate: BIN prefix invalid")
+                        return
+                    }
                     guard let port = server.port else {
                         appendLog(message: "Cannot generate: server not running")
                         return
@@ -531,9 +564,13 @@ struct ContentView: View {
                     client.sendCreateCard(holderName: holderName, binPrefix: binPrefix, port: port)
                 }
                 .buttonStyle(.bordered)
-                .disabled(!isServerRunning)
+                .disabled(!isServerRunning || !isBinValid)
 
                 Button("Generate Locally") {
+                    guard isBinValid else {
+                        appendLog(message: "Local generation failed: invalid BIN prefix")
+                        return
+                    }
                     guard let cardNumber = Luhn.generateCardNumber(prefix: binPrefix) else {
                         appendLog(message: "Local generation failed: invalid BIN prefix")
                         return
@@ -543,10 +580,14 @@ struct ContentView: View {
                     let expiryYear = Calendar.current.component(.year, from: Date()) + Int.random(in: 1...5)
                     let balance = randomMillionsBalance()
                     let card = Card(holderName: holderName, prefix: binPrefix, number: cardNumber, expiryMonth: expiryMonth, expiryYear: expiryYear, cvv: cvv, balance: balance)
-                    store.add(card)
-                    appendLog(message: "Locally generated card for \(holderName)")
+                    if store.add(card) {
+                        appendLog(message: "Locally generated card for \(holderName)")
+                    } else {
+                        appendLog(message: "Skipped local generation: duplicate card number")
+                    }
                 }
                 .buttonStyle(.bordered)
+                .disabled(!isBinValid)
             }
         }
     }
@@ -614,8 +655,11 @@ struct ContentView: View {
 
         server.onCreatedCard = { card in
             DispatchQueue.main.async {
-                store.add(card)
-                appendLog(message: "Server created card for \(card.holderName)")
+                if store.add(card) {
+                    appendLog(message: "Server created card for \(card.holderName)")
+                } else {
+                    appendLog(message: "Server duplicate ignored for \(card.holderName)")
+                }
             }
         }
 
@@ -640,7 +684,6 @@ struct ContentView: View {
             appendLog(message: "Client received response: \(response.message)")
         }
 
-        // Auto-start the server on first appearance to keep the experience fluid.
         if !store.cards.isEmpty {
             appendLog(message: "Restored \(store.cards.count) saved card(s) from storage")
         }
@@ -725,4 +768,3 @@ struct BankApp: App {
     }
 }
 
-// Next improvement: Add CSV export so the saved card history can be shared externally.

@@ -23,6 +23,8 @@ interface.
   saved to disk and restored on launch using the new `PersistenceController`.
 - **Actionable insights** – A summary section highlights card totals, combined
   balances, and average balances for a quick health check.
+- **Safer data entry** – Built-in BIN prefix validation enforces a six-digit,
+  numeric prefix and prevents duplicate card numbers from being stored.
 - **Activity log** – Every important event (server activity, client responses,
   generation outcomes, and administrative actions) is recorded with timestamps.
 - **Management tools** – Clear the saved cards or wipe the activity log directly
