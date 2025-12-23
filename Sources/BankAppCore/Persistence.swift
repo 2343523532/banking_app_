@@ -3,8 +3,8 @@ import Foundation
 /// Handles persistence for generated cards and activity logs.
 /// This lightweight controller stores data in the user's documents directory so
 /// the SwiftUI demo remembers previously generated cards across launches.
-final class PersistenceController {
-    static let shared = PersistenceController()
+public final class PersistenceController {
+    public static let shared = PersistenceController()
 
     private let fileManager = FileManager.default
     private let queue = DispatchQueue(label: "PersistenceController", qos: .background)
@@ -27,7 +27,7 @@ final class PersistenceController {
         logsURL = directory.appendingPathComponent("logs.json")
     }
 
-    func loadCards() -> [Card] {
+    public func loadCards() -> [Card] {
         guard let data = try? Data(contentsOf: cardsURL) else { return [] }
         do {
             return try decoder.decode([Card].self, from: data)
@@ -37,7 +37,7 @@ final class PersistenceController {
         }
     }
 
-    func save(cards: [Card]) {
+    public func save(cards: [Card]) {
         let snapshot = cards
         queue.async { [weak self] in
             guard let self else { return }
@@ -50,7 +50,7 @@ final class PersistenceController {
         }
     }
 
-    func loadLogEntries() -> [LogEntry] {
+    public func loadLogEntries() -> [LogEntry] {
         guard let data = try? Data(contentsOf: logsURL) else { return [] }
         do {
             return try decoder.decode([LogEntry].self, from: data)
@@ -60,7 +60,7 @@ final class PersistenceController {
         }
     }
 
-    func save(logEntries: [LogEntry]) {
+    public func save(logEntries: [LogEntry]) {
         let snapshot = logEntries
         queue.async { [weak self] in
             guard let self else { return }
