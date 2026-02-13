@@ -1,4 +1,6 @@
 import Foundation
+
+#if canImport(Network)
 import Network
 
 public final class BankServer {
@@ -162,3 +164,29 @@ public final class BankServer {
         }
     }
 }
+
+#else
+
+public typealias BankPort = UInt16
+
+public final class BankServer {
+    public private(set) var port: BankPort?
+
+    public var onLog: ((String) -> Void)?
+    public var onCreatedCard: ((Card) -> Void)?
+    public var onPortUpdate: ((BankPort?) -> Void)?
+
+    public init() {}
+
+    public func startListening() {
+        onLog?("Server networking is unavailable on this platform.")
+    }
+
+    public func stop() {
+        port = nil
+        onPortUpdate?(nil)
+        onLog?("Server stopped")
+    }
+}
+
+#endif

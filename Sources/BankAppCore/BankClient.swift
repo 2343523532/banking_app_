@@ -1,4 +1,6 @@
 import Foundation
+
+#if canImport(Network)
 import Network
 
 public final class BankClient {
@@ -88,3 +90,26 @@ public final class BankClient {
         }
     }
 }
+
+#else
+
+public final class BankClient {
+    public var onLog: ((String) -> Void)?
+    public var onResponse: ((BankResponse) -> Void)?
+
+    public init() {}
+
+    public func connect(to port: UInt16) {
+        onLog?("Client networking is unavailable on this platform (port: \(port)).")
+    }
+
+    public func disconnect() {
+        onLog?("Client disconnected")
+    }
+
+    public func sendCreateCard(holderName: String, binPrefix: String, port: UInt16) {
+        onLog?("Client cannot send request because Network framework is unavailable (port: \(port)).")
+    }
+}
+
+#endif
