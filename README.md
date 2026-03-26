@@ -60,6 +60,17 @@ swift test
 3. **Export**: Tap the menu icon (top right) -> "Export CSV" to share your card list.
 4. **Clear Data**: Use the menu to clear cards or logs.
 
+
+## Common Lisp Quantum Simulation
+
+A standalone Common Lisp simulation is provided in `quantum_ai.lisp`. It models a "quantum super AI" cycle that combines cognitive-state updates, Luhn-valid card generation, and simulated SWIFT/crypto balance changes.
+
+Run it with SBCL:
+
+```bash
+sbcl --script quantum_ai.lisp
+```
+
 ## License
 
 MIT License
