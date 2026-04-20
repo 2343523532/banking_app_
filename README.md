@@ -61,14 +61,18 @@ swift test
 4. **Clear Data**: Use the menu to clear cards or logs.
 
 
-## Common Lisp Quantum Simulation
+## Common Lisp Quantum Simulations
 
-A standalone Common Lisp simulation is provided in `quantum_ai.lisp`. It models a "quantum super AI" cycle that combines cognitive-state updates, Luhn-valid card generation, and simulated SWIFT/crypto balance changes.
+Two standalone Common Lisp simulations are included:
 
-Run it with SBCL:
+- `quantum_ai.lisp`: a "quantum super AI" cycle combining cognitive-state updates, Luhn-valid card generation, and simulated SWIFT/crypto balance changes.
+- `quantum_strat_v3.lisp`: a CLOS-based "Quantum-Entropic Strategist" with wave-function collapse simulation, context retrieval, entropic position sizing, and online weight updates.
+
+Run either script with SBCL:
 
 ```bash
 sbcl --script quantum_ai.lisp
+sbcl --script quantum_strat_v3.lisp
 ```
 
 ## License
