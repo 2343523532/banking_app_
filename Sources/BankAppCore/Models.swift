@@ -22,6 +22,36 @@ public struct Card: Identifiable, Codable {
         self.balance = balance
         self.metadata = metadata
     }
+
+    public var maskedNumber: String {
+        guard number.count > 4 else { return number }
+        return String(repeating: "*", count: max(0, number.count - 4)) + number.suffix(4)
+    }
+
+    public var isLikelyValid: Bool {
+        Luhn.isValid(number)
+    }
+
+    public func isExpired(referenceDate: Date = Date(), calendar: Calendar = .current) -> Bool {
+        guard let expiryDate = calendar.date(from: DateComponents(year: expiryYear, month: expiryMonth + 1, day: 1)) else {
+            return true
+        }
+        return referenceDate >= expiryDate
+    }
+
+    @discardableResult
+    public mutating func deposit(_ amount: Decimal) -> Bool {
+        guard amount > 0 else { return false }
+        balance += amount
+        return true
+    }
+
+    @discardableResult
+    public mutating func withdraw(_ amount: Decimal) -> Bool {
+        guard amount > 0, balance >= amount else { return false }
+        balance -= amount
+        return true
+    }
 }
 
 public struct BankRequest: Codable {
