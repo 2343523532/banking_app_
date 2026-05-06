@@ -7,9 +7,11 @@ This repository contains a SwiftUI banking application demo, structured as a Swi
 - **SwiftUI Dashboard**: Interactive controls to start/stop the server, generate cards, and view history.
 - **Networking**: TCP `BankServer` and `BankClient` demonstrating custom protocol handling.
 - **Luhn Validation**: Validates card numbers using the Luhn algorithm.
+- **Sandbox Card Generation**: Centralized test-card generator with brand presets, input sanitation, and explicit demo-only metadata.
 - **Persistence**: JSON-backed persistence for cards and logs.
 - **Metadata Tracking**: Captures and persists connection metadata (source IP, interface) for generated cards.
 - **CSV Export**: Export your card list to CSV for external use.
+- **Search & Summary**: Filter generated cards by holder, brand, or masked number and review brand/balance totals.
 - **Adaptive Layout**: Responsive UI that adapts to different screen sizes.
 
 ## Project Structure
@@ -55,10 +57,13 @@ swift test
 
 1. **Server**: Toggle "Start Server" to begin listening for connections.
 2. **Generate Cards**:
-   - **Locally**: Generates a card immediately on the device.
+   - Pick a sandbox test brand preset and adjust the BIN prefix if needed.
+   - **Locally**: Generates a demo card immediately on the device.
    - **Via Server**: Sends a request to the local TCP server, demonstrating the client-server loop.
-3. **Export**: Tap the menu icon (top right) -> "Export CSV" to share your card list.
-4. **Clear Data**: Use the menu to clear cards or logs.
+   - Generated records are demo/test data only and include sandbox metadata.
+3. **Search**: Filter the generated card list by holder name, brand, or masked number.
+4. **Export**: Tap the menu icon (top right) -> "Export CSV" to share your card list.
+5. **Clear Data**: Use the menu to clear cards or logs.
 
 
 ## Common Lisp Quantum Simulations

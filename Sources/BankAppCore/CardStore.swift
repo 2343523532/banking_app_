@@ -34,6 +34,10 @@ public final class CardStore: ObservableObject {
         }
     }
 
+    public func removeCards(withIDs ids: Set<Card.ID>) {
+        cards.removeAll { ids.contains($0.id) }
+    }
+
     public func removeAll() {
         cards.removeAll()
     }
@@ -78,6 +82,10 @@ public final class CardStore {
             guard cards.indices.contains(offset) else { continue }
             cards.remove(at: offset)
         }
+    }
+
+    public func removeCards(withIDs ids: Set<Card.ID>) {
+        cards.removeAll { ids.contains($0.id) }
     }
 
     public func removeAll() {
