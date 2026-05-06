@@ -24,7 +24,9 @@ struct ContentView: View {
     @State private var client = BankClient()
 
     @State private var holderName = "Alice Example"
-    @State private var binPrefix = "400000"
+    @State private var selectedBrand: CardBrand = .visa
+    @State private var binPrefix = CardBrand.visa.defaultTestPrefix
+    @State private var searchText = ""
 
     @State private var isServerRunning = false
     @State private var logs: [LogEntry] = PersistenceController.shared.loadLogEntries()
@@ -35,19 +37,20 @@ struct ContentView: View {
     private let logLimit = 200
 
     private var binValidationMessage: String? {
-        if binPrefix.isEmpty {
-            return "Enter a BIN prefix to get started."
-        }
-        if !binPrefix.allSatisfy({ $0.isNumber }) {
-            return "BIN prefix must contain digits only."
-        }
-        if binPrefix.count != 6 {
-            return "BIN prefixes are typically 6 digits long."
-        }
-        return nil
+        CardGenerator.validationMessage(forPrefix: binPrefix)
     }
 
     private var isBinValid: Bool { binValidationMessage == nil }
+
+    private var filteredCards: [Card] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return store.cards }
+        return store.cards.filter { card in
+            card.displayName.lowercased().contains(query)
+                || card.maskedNumber.contains(query)
+                || card.brandName.lowercased().contains(query)
+        }
+    }
 
     private static let logFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -152,6 +155,21 @@ struct ContentView: View {
 
     private var cardCreationPanel: some View {
         VStack(spacing: 12) {
+            Text(CardGenerator.testDataNotice)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Picker("Test Brand", selection: $selectedBrand) {
+                ForEach(CardBrand.selectableTestBrands) { brand in
+                    Text(brand.rawValue).tag(brand)
+                }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: selectedBrand) { newBrand in
+                binPrefix = newBrand.defaultTestPrefix
+            }
+
             HStack {
                 TextField("Card Holder", text: $holderName)
                     .textFieldStyle(.roundedBorder)
@@ -159,8 +177,7 @@ struct ContentView: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 140)
                     .onChange(of: binPrefix) { newValue in
-                        let filtered = newValue.filter { $0.isNumber }
-                        let limited = String(filtered.prefix(6))
+                        let limited = String(CardGenerator.sanitizedPrefix(newValue).prefix(6))
                         if limited != newValue {
                             binPrefix = limited
                         }
@@ -194,19 +211,22 @@ struct ContentView: View {
                         appendLog(message: "Local generation failed: invalid BIN prefix")
                         return
                     }
-                    guard let cardNumber = Luhn.generateCardNumber(prefix: binPrefix) else {
-                        appendLog(message: "Local generation failed: invalid BIN prefix")
-                        return
-                    }
-                    let cvv = String(format: "%03d", Int.random(in: 0...999))
-                    let expiryMonth = Int.random(in: 1...12)
-                    let expiryYear = Calendar.current.component(.year, from: Date()) + Int.random(in: 1...5)
-                    let balance = randomMillionsBalance()
-                    let card = Card(holderName: holderName, prefix: binPrefix, number: cardNumber, expiryMonth: expiryMonth, expiryYear: expiryYear, cvv: cvv, balance: balance)
-                    if store.add(card) {
-                        appendLog(message: "Locally generated card for \(holderName)")
-                    } else {
-                        appendLog(message: "Skipped local generation: duplicate card number")
+                    do {
+                        let card = try CardGenerator.makeCard(
+                            options: CardGenerationOptions(
+                                holderName: holderName,
+                                binPrefix: binPrefix,
+                                brand: selectedBrand,
+                                metadata: ["sourceType": "local"]
+                            )
+                        )
+                        if store.add(card) {
+                            appendLog(message: "Locally generated \(selectedBrand.rawValue) sandbox card for \(card.displayName)")
+                        } else {
+                            appendLog(message: "Skipped local generation: duplicate card number")
+                        }
+                    } catch {
+                        appendLog(message: "Local generation failed: \(error.localizedDescription)")
                     }
                 }
                 .buttonStyle(.bordered)
@@ -224,6 +244,7 @@ struct ContentView: View {
                     if let average = averageBalance() {
                         summaryRow(title: "Average balance", value: formattedBalance(average))
                     }
+                    summaryRow(title: "Brands", value: brandSummary())
                 }
             }
 
@@ -232,10 +253,20 @@ struct ContentView: View {
                     Text("No cards yet. Generate one to begin.")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(store.cards) { card in
+                    TextField("Search holder, brand, or masked number", text: $searchText)
+                        .textFieldStyle(.roundedBorder)
+
+                    if filteredCards.isEmpty {
+                        Text("No cards match your search.")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ForEach(filteredCards) { card in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(card.holderName)
+                            Text(card.displayName)
                                 .font(.headline)
+                            Text("Brand: \(card.brandName)")
+                                .foregroundStyle(.secondary)
                             Text("Number: \(masked(card.number))")
                             Text("Expiry: \(card.expiryMonth)/\(card.expiryYear)  CVV: \(card.cvv)")
                                 .foregroundStyle(.secondary)
@@ -246,7 +277,7 @@ struct ContentView: View {
                         }
                         .padding(.vertical, 6)
                     }
-                    .onDelete(perform: store.remove)
+                    .onDelete(perform: removeFilteredCards)
                 }
             }
 
@@ -329,6 +360,13 @@ struct ContentView: View {
         persistence.save(logEntries: logs)
     }
 
+    private func removeFilteredCards(at offsets: IndexSet) {
+        let idsToRemove = offsets.compactMap { offset in
+            filteredCards.indices.contains(offset) ? filteredCards[offset].id : nil
+        }
+        store.removeCards(withIDs: Set(idsToRemove))
+    }
+
     private func performClearAction(_ action: ClearAction) {
         switch action {
         case .cards:
@@ -349,6 +387,14 @@ struct ContentView: View {
         let total = totalBalance()
         let count = Decimal(store.cards.count)
         return total / count
+    }
+
+    private func brandSummary() -> String {
+        let grouped = Dictionary(grouping: store.cards, by: { $0.brandName })
+        return grouped
+            .map { "\($0.key): \($0.value.count)" }
+            .sorted()
+            .joined(separator: " • ")
     }
 
     private func trimLogsIfNeeded() {

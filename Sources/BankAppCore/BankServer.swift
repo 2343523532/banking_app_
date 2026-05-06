@@ -112,24 +112,13 @@ public final class BankServer {
                 return
             }
 
-            guard let bin = request.binPrefix, !bin.isEmpty, let holder = request.holderName, !holder.isEmpty else {
+            guard let rawBin = request.binPrefix, !rawBin.isEmpty, let rawHolder = request.holderName, !rawHolder.isEmpty else {
                 let response = BankResponse(status: "error", message: "Missing holder or BIN prefix", card: nil)
                 send(response: response, to: connection)
                 return
             }
 
-            guard let cardNumber = Luhn.generateCardNumber(prefix: bin) else {
-                let response = BankResponse(status: "error", message: "Unable to generate number", card: nil)
-                send(response: response, to: connection)
-                return
-            }
-
-            let cvv = String(format: "%03d", Int.random(in: 0...999))
-            let expiryMonth = Int.random(in: 1...12)
-            let expiryYear = Calendar.current.component(.year, from: Date()) + Int.random(in: 1...5)
-            let balance = randomMillionsBalance()
-
-            var metadata: [String: String] = [:]
+            var metadata: [String: String] = ["sourceType": "server"]
             if let endpoint = connection.endpoint {
                 metadata["source"] = "\(endpoint)"
             }
@@ -137,10 +126,18 @@ public final class BankServer {
                 metadata["interface"] = "\(currentPath.availableInterfaces.first?.name ?? "unknown")"
             }
 
-            let card = Card(holderName: holder, prefix: bin, number: cardNumber, expiryMonth: expiryMonth, expiryYear: expiryYear, cvv: cvv, balance: balance, metadata: metadata)
+            let options = CardGenerationOptions(holderName: rawHolder, binPrefix: rawBin, metadata: metadata)
+            let card: Card
+            do {
+                card = try CardGenerator.makeCard(options: options)
+            } catch {
+                let response = BankResponse(status: "error", message: error.localizedDescription, card: nil)
+                send(response: response, to: connection)
+                return
+            }
 
             onCreatedCard?(card)
-            onLog?("Generated card for \(holder) with BIN \(bin)")
+            onLog?("Generated sandbox card for \(card.displayName) with BIN \(card.prefix)")
 
             let response = BankResponse(status: "success", message: "Card created", card: card)
             send(response: response, to: connection)

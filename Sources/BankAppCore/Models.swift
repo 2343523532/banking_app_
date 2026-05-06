@@ -24,8 +24,15 @@ public struct Card: Identifiable, Codable {
     }
 
     public var maskedNumber: String {
-        guard number.count > 4 else { return number }
-        return String(repeating: "*", count: max(0, number.count - 4)) + number.suffix(4)
+        Luhn.masked(number)
+    }
+
+    public var brandName: String {
+        metadata?["brand"] ?? Luhn.cardBrand(for: number)
+    }
+
+    public var displayName: String {
+        holderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Unnamed Holder" : holderName
     }
 
     public var isLikelyValid: Bool {

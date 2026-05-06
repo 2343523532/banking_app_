@@ -7,6 +7,12 @@ final class CardModelTests: XCTestCase {
         XCTAssertEqual(card.maskedNumber, "************7890")
     }
 
+    func testBrandAndDisplayNameFallbacks() {
+        let card = Card(holderName: "   ", prefix: "400000", number: "4111111111111111", expiryMonth: 12, expiryYear: 2030, cvv: "123", balance: 0)
+        XCTAssertEqual(card.displayName, "Unnamed Holder")
+        XCTAssertEqual(card.brandName, "Visa")
+    }
+
     func testValidityAndExpiry() {
         let validNumber = Luhn.generateCardNumber(prefix: "400000")!
         let card = Card(holderName: "A", prefix: "400000", number: validNumber, expiryMonth: 1, expiryYear: 2020, cvv: "123", balance: 0)
