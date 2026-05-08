@@ -49,7 +49,12 @@ struct ContentView: View {
             card.displayName.lowercased().contains(query)
                 || card.maskedNumber.contains(query)
                 || card.brandName.lowercased().contains(query)
+                || card.healthStatus().rawValue.lowercased().contains(query)
         }
+    }
+
+    private var portfolioSummary: CardPortfolioSummary {
+        CardPortfolioSummary(cards: store.cards)
     }
 
     private static let logFormatter: DateFormatter = {
@@ -239,12 +244,19 @@ struct ContentView: View {
         List {
             if !store.cards.isEmpty {
                 Section("Summary") {
-                    summaryRow(title: "Cards on file", value: "\(store.cards.count)")
-                    summaryRow(title: "Total balance", value: formattedBalance(totalBalance()))
-                    if let average = averageBalance() {
+                    summaryRow(title: "Cards on file", value: "\(portfolioSummary.totalCards)")
+                    summaryRow(title: "Active cards", value: "\(portfolioSummary.activeCards)")
+                    if portfolioSummary.attentionCount > 0 {
+                        summaryRow(title: "Needs attention", value: "\(portfolioSummary.attentionCount)")
+                    }
+                    summaryRow(title: "Total balance", value: formattedBalance(portfolioSummary.totalBalance))
+                    if let average = portfolioSummary.averageBalance {
                         summaryRow(title: "Average balance", value: formattedBalance(average))
                     }
-                    summaryRow(title: "Brands", value: brandSummary())
+                    if let highest = portfolioSummary.highestBalanceCard {
+                        summaryRow(title: "Highest balance", value: "\(highest.displayName) • \(formattedBalance(highest.balance))")
+                    }
+                    summaryRow(title: "Brands", value: portfolioSummary.brandSummary)
                 }
             }
 
@@ -265,8 +277,18 @@ struct ContentView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(card.displayName)
                                 .font(.headline)
-                            Text("Brand: \(card.brandName)")
-                                .foregroundStyle(.secondary)
+                            HStack(spacing: 8) {
+                                Text("Brand: \(card.brandName)")
+                                    .foregroundStyle(.secondary)
+                                Text(card.healthStatus().rawValue)
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(statusColor(for: card.healthStatus()).opacity(0.15))
+                                    .foregroundStyle(statusColor(for: card.healthStatus()))
+                                    .clipShape(Capsule())
+                            }
                             Text("Number: \(masked(card.number))")
                             Text("Expiry: \(card.expiryMonth)/\(card.expiryYear)  CVV: \(card.cvv)")
                                 .foregroundStyle(.secondary)
@@ -378,23 +400,15 @@ struct ContentView: View {
         pendingClearAction = nil
     }
 
-    private func totalBalance() -> Decimal {
-        store.cards.reduce(Decimal.zero) { $0 + $1.balance }
-    }
-
-    private func averageBalance() -> Decimal? {
-        guard !store.cards.isEmpty else { return nil }
-        let total = totalBalance()
-        let count = Decimal(store.cards.count)
-        return total / count
-    }
-
-    private func brandSummary() -> String {
-        let grouped = Dictionary(grouping: store.cards, by: { $0.brandName })
-        return grouped
-            .map { "\($0.key): \($0.value.count)" }
-            .sorted()
-            .joined(separator: " • ")
+    private func statusColor(for status: CardHealthStatus) -> Color {
+        switch status {
+        case .active:
+            return .green
+        case .expiringSoon:
+            return .orange
+        case .expired, .invalidNumber:
+            return .red
+        }
     }
 
     private func trimLogsIfNeeded() {
