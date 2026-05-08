@@ -11,7 +11,8 @@ This repository contains a SwiftUI banking application demo, structured as a Swi
 - **Persistence**: JSON-backed persistence for cards and logs.
 - **Metadata Tracking**: Captures and persists connection metadata (source IP, interface) for generated cards.
 - **CSV Export**: Export your card list to CSV for external use.
-- **Search & Summary**: Filter generated cards by holder, brand, or masked number and review brand/balance totals.
+- **Search & Summary**: Filter generated cards by holder, brand, masked number, or health status and review brand/balance totals.
+- **Card Health Insights**: Highlights active, expiring-soon, expired, and invalid sandbox cards with attention counts.
 - **Adaptive Layout**: Responsive UI that adapts to different screen sizes.
 
 ## Project Structure
@@ -61,7 +62,7 @@ swift test
    - **Locally**: Generates a demo card immediately on the device.
    - **Via Server**: Sends a request to the local TCP server, demonstrating the client-server loop.
    - Generated records are demo/test data only and include sandbox metadata.
-3. **Search**: Filter the generated card list by holder name, brand, or masked number.
+3. **Search**: Filter the generated card list by holder name, brand, health status, or masked number.
 4. **Export**: Tap the menu icon (top right) -> "Export CSV" to share your card list.
 5. **Clear Data**: Use the menu to clear cards or logs.
 
