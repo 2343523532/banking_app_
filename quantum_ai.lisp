@@ -65,7 +65,7 @@
     (list :network "QUANTUM_BLOCKCHAIN"
           :wallet-address (quantum-super-ai-crypto-wallet-address ai)
           :balance-usd-value (format nil "$~:d" (round (quantum-super-ai-crypto-balance ai)))
-          :market-shift (format nil "~:+,2f%%" (* 100 fluctuation)))))
+          :market-shift (format nil "~,2@f%%" (* 100 fluctuation)))))
 
 (defun generate-luhn-valid-card (&optional (prefix "4"))
   "Generate a 16-digit Luhn-valid card-like string."
@@ -177,5 +177,79 @@
       (run-cycle ai
                  (format nil "Executing Global Financial & Data Sweep #~d"
                          (1+ i))))))
+
+;; ======================================================================
+;; GLOBAL STATE & HYPERPARAMETERS
+;; ======================================================================
+
+(defparameter *system-state*
+  (list
+   :epoch 0
+   :learning-rate 0.05
+   :knowledge-base
+   (list
+    (list :id 1 :vector '(0.8 0.1 0.1) :score 0.8 :label "Momentum")
+    (list :id 2 :vector '(0.2 0.7 0.1) :score 0.5 :label "Mean Reversion")
+    (list :id 3 :vector '(0.3 0.3 0.9) :score 0.3 :label "Chaos/Risk"))
+   :portfolio (list :balance 10000.0 :history '())))
+
+(defparameter *reasoning-depth* 1)
+
+;; ======================================================================
+;; ADVANCED VECTOR MATH
+;; ======================================================================
+
+(defun dot-product (v1 v2)
+  (reduce #'+ (mapcar #'* v1 v2)))
+
+(defun magnitude (v)
+  (sqrt (reduce #'+ (mapcar (lambda (x) (* x x)) v))))
+
+(defun cosine-similarity (v1 v2)
+  "Returns a score between -1 and 1. 1 means identical direction."
+  (let ((mag-prod (* (magnitude v1) (magnitude v2))))
+    (if (= mag-prod 0) 0 (/ (dot-product v1 v2) mag-prod))))
+
+;; ======================================================================
+;; CONTEXT RETRIEVAL & EVOLUTION
+;; ======================================================================
+
+(defun retrieve-context (kb query k)
+  "Retrieve top-k concepts using Cosine Similarity."
+  (let ((scored
+         (mapcar (lambda (item)
+                   (let ((sim (cosine-similarity (getf item :vector) query)))
+                     (list :item item :sim sim :weighted-score (* sim (getf item :score)))))
+                 kb)))
+    (mapcar (lambda (x)
+              (append (getf x :item) (list :sim (getf x :sim))))
+            (subseq (sort scored #'> :key (lambda (x) (getf x :sim))) 0 (min k (length kb))))))
+
+(defun evolve-knowledge-base (query-vector label)
+  "Adds a new concept to the brain if the market behaves in a new way."
+  (let ((new-id (1+ (length (getf *system-state* :knowledge-base)))))
+    (push (list :id new-id :vector query-vector :score 0.5 :label label)
+          (getf *system-state* :knowledge-base))
+    (format t "[EVOLUTION] New market pattern recognized: ~A~%" label)))
+
+;; ======================================================================
+;; ADAPTIVE REASONING & QUANTUM INTERFERENCE
+;; ======================================================================
+
+(defmacro with-adaptive-reasoning (complexity &body body)
+  `(let ((*reasoning-depth*
+          (cond ((> ,complexity 0.7) 5)
+                ((> ,complexity 0.4) 3)
+                (t 1))))
+     ,@body))
+
+(defun apply-quantum-interference (options)
+  "Simulates probability interference using a phase-shift approach."
+  (let* ((base-probs (mapcar (lambda (x) (getf x :base-prob)) options))
+         ;; Constructive/Destructive interference based on a pseudo-random phase
+         (interference (mapcar (lambda (_) (+ 0.5 (- (random 1.0) 0.5))) options)))
+    (mapcar (lambda (opt inter)
+              (append opt (list :interfered-prob (* (getf opt :base-prob) inter))))
+            options interference)))
 
 (run-demo 3)
